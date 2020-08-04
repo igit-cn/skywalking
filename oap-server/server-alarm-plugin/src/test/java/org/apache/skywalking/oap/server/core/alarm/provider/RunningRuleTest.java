@@ -23,6 +23,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.apache.skywalking.oap.server.core.Const;
 import org.apache.skywalking.oap.server.core.alarm.AlarmCallback;
 import org.apache.skywalking.oap.server.core.alarm.AlarmMessage;
 import org.apache.skywalking.oap.server.core.alarm.MetaInAlarm;
@@ -143,8 +144,9 @@ public class RunningRuleTest {
         // check at 201808301442
         alarmMessages = runningRule.check();
         Assert.assertEquals(1, alarmMessages.size());
-        Assert.assertEquals("response percentile of endpoint Service_123 is lower than expected values", alarmMessages.get(0)
-                                                                                                                      .getAlarmMessage());
+        Assert.assertEquals(
+            "response percentile of endpoint Service_123 is lower than expected values", alarmMessages.get(0)
+                                                                                                      .getAlarmMessage());
     }
 
     @Test
@@ -260,6 +262,70 @@ public class RunningRuleTest {
         Assert.assertEquals(0, runningRule.check().size());
     }
 
+    @Test
+    public void testIncludeNamesRegex() {
+        AlarmRule alarmRule = new AlarmRule();
+        alarmRule.setAlarmRuleName("endpoint_percent_rule");
+        alarmRule.setMetricsName("endpoint_percent");
+        alarmRule.setOp("<");
+        alarmRule.setThreshold("1000");
+        alarmRule.setCount(1);
+        alarmRule.setPeriod(10);
+        alarmRule.setMessage("Response time of service instance {name} is more than 1000ms in 2 minutes of last 10 minutes");
+        alarmRule.setIncludeNamesRegex("Service\\_1(\\d)+");
+
+        RunningRule runningRule = new RunningRule(alarmRule);
+
+        long timeInPeriod1 = 201808301434L;
+        long timeInPeriod2 = 201808301436L;
+        long timeInPeriod3 = 201808301439L;
+
+        runningRule.in(getMetaInAlarm(123), getMetrics(timeInPeriod1, 70));
+        runningRule.in(getMetaInAlarm(123), getMetrics(timeInPeriod2, 70));
+        runningRule.in(getMetaInAlarm(223), getMetrics(timeInPeriod3, 74));
+
+        // check at 201808301440
+        Assert.assertEquals(1, runningRule.check().size());
+        runningRule.moveTo(TIME_BUCKET_FORMATTER.parseLocalDateTime("201808301441"));
+        // check at 201808301441
+        Assert.assertEquals(1, runningRule.check().size());
+        runningRule.moveTo(TIME_BUCKET_FORMATTER.parseLocalDateTime("201808301446"));
+        // check at 201808301442
+        Assert.assertEquals(0, runningRule.check().size());
+    }
+
+    @Test
+    public void testExcludeNamesRegex() {
+        AlarmRule alarmRule = new AlarmRule();
+        alarmRule.setAlarmRuleName("endpoint_percent_rule");
+        alarmRule.setMetricsName("endpoint_percent");
+        alarmRule.setOp("<");
+        alarmRule.setThreshold("1000");
+        alarmRule.setCount(1);
+        alarmRule.setPeriod(10);
+        alarmRule.setMessage("Response time of service instance {name} is more than 1000ms in 2 minutes of last 10 minutes");
+        alarmRule.setExcludeNamesRegex("Service\\_2(\\d)+");
+
+        RunningRule runningRule = new RunningRule(alarmRule);
+
+        long timeInPeriod1 = 201808301434L;
+        long timeInPeriod2 = 201808301436L;
+        long timeInPeriod3 = 201808301439L;
+
+        runningRule.in(getMetaInAlarm(123), getMetrics(timeInPeriod1, 70));
+        runningRule.in(getMetaInAlarm(123), getMetrics(timeInPeriod2, 70));
+        runningRule.in(getMetaInAlarm(223), getMetrics(timeInPeriod3, 74));
+
+        // check at 201808301440
+        Assert.assertEquals(1, runningRule.check().size());
+        runningRule.moveTo(TIME_BUCKET_FORMATTER.parseLocalDateTime("201808301441"));
+        // check at 201808301441
+        Assert.assertEquals(1, runningRule.check().size());
+        runningRule.moveTo(TIME_BUCKET_FORMATTER.parseLocalDateTime("201808301446"));
+        // check at 201808301442
+        Assert.assertEquals(0, runningRule.check().size());
+    }
+
     private MetaInAlarm getMetaInAlarm(int id) {
         return new MetaInAlarm() {
             @Override
@@ -283,19 +349,19 @@ public class RunningRuleTest {
             }
 
             @Override
-            public int getId0() {
-                return id;
+            public String getId0() {
+                return "" + id;
             }
 
             @Override
-            public int getId1() {
-                return 0;
+            public String getId1() {
+                return Const.EMPTY_STRING;
             }
 
             @Override
             public boolean equals(Object o) {
                 MetaInAlarm target = (MetaInAlarm) o;
-                return id == target.getId0();
+                return (id + "").equals(target.getId0());
             }
 
             @Override
@@ -345,11 +411,6 @@ public class RunningRuleTest {
 
         @Override
         public Metrics toDay() {
-            return null;
-        }
-
-        @Override
-        public Metrics toMonth() {
             return null;
         }
 
@@ -407,11 +468,6 @@ public class RunningRuleTest {
 
         @Override
         public Metrics toDay() {
-            return null;
-        }
-
-        @Override
-        public Metrics toMonth() {
             return null;
         }
 
