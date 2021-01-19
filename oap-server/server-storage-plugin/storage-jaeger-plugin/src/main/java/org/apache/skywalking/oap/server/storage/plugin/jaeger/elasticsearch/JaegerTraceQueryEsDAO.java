@@ -29,6 +29,7 @@ import java.util.Collections;
 import java.util.List;
 import org.apache.skywalking.apm.util.StringUtil;
 import org.apache.skywalking.oap.server.core.analysis.IDManager;
+import org.apache.skywalking.oap.server.core.analysis.manual.searchtag.Tag;
 import org.apache.skywalking.oap.server.core.analysis.manual.segment.SegmentRecord;
 import org.apache.skywalking.oap.server.core.query.type.BasicTrace;
 import org.apache.skywalking.oap.server.core.query.type.KeyValue;
@@ -89,7 +90,8 @@ public class JaegerTraceQueryEsDAO extends EsDAO implements ITraceQueryDAO {
                                        int limit,
                                        int from,
                                        TraceState traceState,
-                                       QueryOrder queryOrder) throws IOException {
+                                       QueryOrder queryOrder,
+                                       final List<Tag> tags) throws IOException {
 
         SearchSourceBuilder sourceBuilder = SearchSourceBuilder.searchSource();
 

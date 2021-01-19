@@ -1,6 +1,13 @@
 # Plugin Development Guide
-This document describe how to understand, develop and contribute plugin.
+This document describe how to understand, develop and contribute plugin. 
 
+There are 2 kinds of plugin
+1. [Tracing plugin](#tracing-plugin). Follow the distributed tracing concept to collect spans with tags and logs.
+1. [Meter plugin](#meter-plugin). Collect numeric metrics in Counter, Guage, and Histogram formats.
+
+We also provide the [plugin test tool](#plugin-test-tool) to verify the data collected and reported by the plugin. If you plan to contribute any plugin to our main repo, the data would be verified by this tool too.
+
+# Tracing plugin
 ## Concepts
 ### Span
 Span is an important and common concept in distributed tracing system. Learn **Span** from 
@@ -227,7 +234,7 @@ so you just need to define the intercept point(a.k.a. aspect pointcut in Spring)
 ### Intercept
 SkyWalking provide two common defines to intercept Contructor, instance method and class method.
 * Extend `ClassInstanceMethodsEnhancePluginDefine` defines `Contructor` intercept points and `instance method` intercept points.
-* Extend `ClassStaticMethodsEnhancePluginDefine` definec `class method` intercept points.
+* Extend `ClassStaticMethodsEnhancePluginDefine` defines `class method` intercept points.
 
 Of course, you can extend `ClassEnhancePluginDefine` to set all intercept points. But it is unusual. 
 
@@ -292,6 +299,31 @@ The following sections will tell you how to implement the interceptor.
 tomcat-7.x/8.x=TomcatInstrumentation
 ```
 
+4. Set up `witnessClasses` and/or `witnessMethods` if the instrumentation should be activated in specific versions.
+
+   Example:
+
+   ```java
+   // The plugin is activated only when the foo.Bar class exists.
+   @Override
+   protected String[] witnessClasses() {
+     return new String[] {
+       "foo.Bar"
+     };
+   }
+   
+   // The plugin is activated only when the foo.Bar#hello method exists.
+   @Override
+   protected List<WitnessMethod> witnessMethods() {
+     List<WitnessMethod> witnessMethodList = new ArrayList<>();
+     WitnessMethod witnessMethod = new WitnessMethod("foo.Bar", ElementMatchers.named("hello"));
+     witnessMethodList.add(witnessMethod);
+     return witnessMethodList;
+   }
+   ```
+   For more example, see [WitnessTest.java](/apm-sniffer/apm-agent-core/src/test/java/org/apache/skywalking/apm/agent/core/plugin/witness/WitnessTest.java)
+
+   
 
 ### Implement an interceptor
 As an interceptor for an instance method, the interceptor implements 
@@ -375,7 +407,97 @@ public class URLInstrumentation extends ClassEnhancePluginDefine {
 **NOTICE**, doing bootstrap instrumentation should only happen in necessary, but mostly it effect the JRE core(rt.jar),
 and could make very unexpected result or side effect.
 
-### Plugin Test Tool
+### Provide Customization Config for the Plugin
+The config could provide different behaviours based on the configurations. SkyWalking plugin mechanism provides the configuration
+injection and initialization system in the agent core.
+
+Every plugin could declare one or more classes to represent the config by using `@PluginConfig` annotation. The agent core
+could initialize this class' static field though System environments, System properties, and `agent.config` static file.
+
+The `#root()` method in the `@PluginConfig` annotation requires to declare the root class for the initialization process.
+Typically, SkyWalking prefers to use nested inner static classes for the hierarchy of the configuration. 
+Recommend using `Plugin`/`plugin-name`/`config-key` as the nested classes structure of the Config class.
+
+NOTE, because of the Java ClassLoader mechanism, the `@PluginConfig` annotation should be added on the real class used in the interceptor codes. 
+
+Such as, in the following example, `@PluginConfig(root = SpringMVCPluginConfig.class)` represents the initialization should 
+start with using `SpringMVCPluginConfig` as the root. Then the config key of the attribute `USE_QUALIFIED_NAME_AS_ENDPOINT_NAME`,
+should be `plugin.springmvc.use_qualified_name_as_endpoint_name`.
+```java
+public class SpringMVCPluginConfig {
+    public static class Plugin {
+        // NOTE, if move this annotation on the `Plugin` or `SpringMVCPluginConfig` class, it no longer has any effect. 
+        @PluginConfig(root = SpringMVCPluginConfig.class)
+        public static class SpringMVC {
+            /**
+             * If true, the fully qualified method name will be used as the endpoint name instead of the request URL,
+             * default is false.
+             */
+            public static boolean USE_QUALIFIED_NAME_AS_ENDPOINT_NAME = false;
+
+            /**
+             * This config item controls that whether the SpringMVC plugin should collect the parameters of the
+             * request.
+             */
+            public static boolean COLLECT_HTTP_PARAMS = false;
+        }
+
+        @PluginConfig(root = SpringMVCPluginConfig.class)
+        public static class Http {
+            /**
+             * When either {@link Plugin.SpringMVC#COLLECT_HTTP_PARAMS} is enabled, how many characters to keep and send
+             * to the OAP backend, use negative values to keep and send the complete parameters, NB. this config item is
+             * added for the sake of performance
+             */
+            public static int HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        }
+    }
+}
+```
+
+
+# Meter Plugin
+Java agent plugin could use meter APIs to collect the metrics for backend analysis.
+
+* `Counter` API represents a single monotonically increasing counter, automatic collect data and report to backend.
+```java
+import org.apache.skywalking.apm.agent.core.meter.MeterFactory;
+
+Counter counter = MeterFactory.counter(meterName).tag("tagKey", "tagValue").mode(Counter.Mode.INCREMENT).build();
+counter.increment(1d);
+```
+1. `MeterFactory.counter` Create a new counter builder with the meter name.
+1. `Counter.Builder.tag(String key, String value)` Mark a tag key/value pair.
+1. `Counter.Builder.mode(Counter.Mode mode)` Change the counter mode, `RATE` mode means reporting rate to the backend.
+1. `Counter.Builder.build()` Build a new `Counter` which is collected and reported to the backend.
+1. `Counter.increment(double count)` Increment count to the `Counter`, It could be a positive value.
+
+* `Gauge` API represents a single numerical value.
+```java
+import org.apache.skywalking.apm.agent.core.meter.MeterFactory;
+
+ThreadPoolExecutor threadPool = ...;
+Gauge gauge = MeterFactory.gauge(meterName, () -> threadPool.getActiveCount()).tag("tagKey", "tagValue").build();
+```
+1. `MeterFactory.gauge(String name, Supplier<Double> getter)` Create a new gauge builder with the meter name and supplier function, this function need to return a `double` value.
+1. `Gauge.Builder.tag(String key, String value)` Mark a tag key/value pair.
+1. `Gauge.Builder.build()` Build a new `Gauge` which is collected and reported to the backend.
+
+* `Histogram` API represents a summary sample observations with customize buckets.
+```java
+import org.apache.skywalking.apm.agent.core.meter.MeterFactory;
+
+Histogram histogram = MeterFactory.histogram("test").tag("tagKey", "tagValue").steps(Arrays.asList(1, 5, 10)).minValue(0).build();
+histogram.addValue(3);
+```
+1. `MeterFactory.histogram(String name)` Create a new histogram builder with the meter name.
+1. `Histogram.Builder.tag(String key, String value)` Mark a tag key/value pair.
+1. `Histogram.Builder.steps(List<Double> steps)` Set up the max values of every histogram buckets.
+1. `Histogram.Builder.minValue(double value)` Set up the minimal value of this histogram, default is `0`.
+1. `Histogram.Builder.build()` Build a new `Histogram` which is collected and reported to the backend.
+1. `Histogram.addValue(double value)` Add value into the histogram, automatically analyze what bucket count needs to be increment. rule: count into [step1, step2).
+
+# Plugin Test Tool
 [Apache SkyWalking Agent Test Tool Suite](https://github.com/apache/skywalking-agent-test-tool)
 a tremendously useful test tools suite in a wide variety of languages of Agent. Includes mock collector and validator. 
 The mock collector is a SkyWalking receiver, like OAP server.
@@ -383,7 +505,7 @@ The mock collector is a SkyWalking receiver, like OAP server.
 You could learn how to use this tool to test the plugin in [this doc](Plugin-test.md). If you want to contribute plugins
 to SkyWalking official repo, this is required.
 
-### Contribute plugins into Apache SkyWalking repository
+# Contribute plugins into Apache SkyWalking repository
 We are welcome everyone to contribute plugins.
 
 Please follow there steps:

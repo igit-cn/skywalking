@@ -20,6 +20,7 @@ package org.apache.skywalking.oap.server.core.analysis.manual.segment;
 
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import joptsimple.internal.Strings;
 import lombok.Getter;
@@ -27,6 +28,7 @@ import lombok.Setter;
 import org.apache.skywalking.apm.util.StringUtil;
 import org.apache.skywalking.oap.server.core.Const;
 import org.apache.skywalking.oap.server.core.analysis.Stream;
+import org.apache.skywalking.oap.server.core.analysis.manual.searchtag.Tag;
 import org.apache.skywalking.oap.server.core.analysis.record.Record;
 import org.apache.skywalking.oap.server.core.analysis.topn.TopN;
 import org.apache.skywalking.oap.server.core.analysis.worker.RecordStreamProcessor;
@@ -53,6 +55,7 @@ public class SegmentRecord extends Record {
     public static final String IS_ERROR = "is_error";
     public static final String DATA_BINARY = "data_binary";
     public static final String VERSION = "version";
+    public static final String TAGS = "tags";
 
     @Setter
     @Getter
@@ -106,6 +109,17 @@ public class SegmentRecord extends Record {
     @Getter
     @Column(columnName = VERSION, storageOnly = true)
     private int version;
+    @Setter
+    @Getter
+    @Column(columnName = TAGS)
+    private List<String> tags;
+    /**
+     * Tags raw data is a duplicate field of {@link #tags}. Some storage don't support array values in a single column.
+     * Then, those implementations could use this raw data to generate necessary data structures.
+     */
+    @Setter
+    @Getter
+    private List<Tag> tagsRawData;
 
     @Override
     public String id() {
@@ -139,6 +153,7 @@ public class SegmentRecord extends Record {
                 map.put(DATA_BINARY, new String(Base64.getEncoder().encode(storageData.getDataBinary())));
             }
             map.put(VERSION, storageData.getVersion());
+            map.put(TAGS, storageData.getTags());
             return map;
         }
 
@@ -163,6 +178,7 @@ public class SegmentRecord extends Record {
                 record.setDataBinary(Base64.getDecoder().decode((String) dbMap.get(DATA_BINARY)));
             }
             record.setVersion(((Number) dbMap.get(VERSION)).intValue());
+            // Don't read the tags as they has been in the data binary already.
             return record;
         }
     }

@@ -26,9 +26,13 @@ import org.apache.skywalking.oap.server.library.module.Service;
 public class ConfigService implements Service {
     private final String gRPCHost;
     private final int gRPCPort;
+    private final String searchableTracesTags;
+    private final String searchableLogsTags;
 
     public ConfigService(CoreModuleConfig moduleConfig) {
         this.gRPCHost = moduleConfig.getGRPCHost();
         this.gRPCPort = moduleConfig.getGRPCPort();
+        this.searchableTracesTags = moduleConfig.getSearchableTracesTags();
+        this.searchableLogsTags = moduleConfig.getSearchableLogsTags();
     }
 }

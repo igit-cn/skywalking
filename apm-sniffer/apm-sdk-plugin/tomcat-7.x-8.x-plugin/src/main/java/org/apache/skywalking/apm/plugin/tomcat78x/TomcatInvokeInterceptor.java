@@ -101,8 +101,8 @@ public class TomcatInvokeInterceptor implements InstanceMethodsAroundInterceptor
         if (!TomcatPluginConfig.Plugin.Tomcat.COLLECT_HTTP_PARAMS && span.isProfiling()) {
             collectHttpParam(request, span);
         }
-        ContextManager.stopSpan();
         ContextManager.getRuntimeContext().remove(Constants.FORWARD_REQUEST_FLAG);
+        ContextManager.stopSpan();
         return ret;
     }
 
@@ -111,7 +111,6 @@ public class TomcatInvokeInterceptor implements InstanceMethodsAroundInterceptor
                                       Class<?>[] argumentsTypes, Throwable t) {
         AbstractSpan span = ContextManager.activeSpan();
         span.log(t);
-        span.errorOccurred();
     }
 
     private void collectHttpParam(Request request, AbstractSpan span) {
