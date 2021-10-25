@@ -23,9 +23,11 @@ import io.envoyproxy.envoy.service.metrics.v3.StreamMetricsMessage;
 import io.envoyproxy.envoy.service.metrics.v3.StreamMetricsResponse;
 import io.grpc.stub.StreamObserver;
 import io.prometheus.client.Metrics;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.skywalking.apm.util.StringUtil;
@@ -36,7 +38,6 @@ import org.apache.skywalking.oap.server.library.module.ModuleManager;
 import org.apache.skywalking.oap.server.library.module.ModuleStartException;
 import org.apache.skywalking.oap.server.library.util.prometheus.metrics.Metric;
 import org.apache.skywalking.oap.server.receiver.envoy.als.ServiceMetaInfo;
-import org.apache.skywalking.oap.server.receiver.envoy.als.mx.ServiceMetaInfoAdapter;
 import org.apache.skywalking.oap.server.receiver.envoy.metrics.adapters.ProtoMetricFamily2MetricsAdapter;
 import org.apache.skywalking.oap.server.telemetry.TelemetryModule;
 import org.apache.skywalking.oap.server.telemetry.api.CounterMetrics;
@@ -50,7 +51,12 @@ public class MetricServiceGRPCHandler extends MetricsServiceGrpc.MetricsServiceI
     private final HistogramMetrics histogram;
     private final List<PrometheusMetricConverter> converters;
 
-    public MetricServiceGRPCHandler(final ModuleManager moduleManager, final EnvoyMetricReceiverConfig config) throws ModuleStartException {
+    private final EnvoyMetricReceiverConfig config;
+
+    public MetricServiceGRPCHandler(final ModuleManager moduleManager,
+                                    final EnvoyMetricReceiverConfig config) throws ModuleStartException {
+        this.config = config;
+
         MetricsCreator metricsCreator = moduleManager.find(TelemetryModule.NAME)
                                                      .provider()
                                                      .getService(MetricsCreator.class);
@@ -86,28 +92,38 @@ public class MetricServiceGRPCHandler extends MetricsServiceGrpc.MetricsServiceI
 
                 if (isFirst) {
                     isFirst = false;
-                    service = new ServiceMetaInfoAdapter(message.getIdentifier().getNode().getMetadata());
+                    service = config.serviceMetaInfoFactory()
+                                    .fromStruct(message.getIdentifier().getNode().getMetadata());
                 }
 
                 if (log.isDebugEnabled()) {
                     log.debug("Envoy metrics reported from service[{}]", service);
                 }
 
-                if (service != null && StringUtil.isNotEmpty(service.getServiceName()) && StringUtil.isNotEmpty(service.getServiceInstanceName())) {
+                if (service != null && StringUtil.isNotEmpty(service.getServiceName()) && StringUtil.isNotEmpty(
+                    service.getServiceInstanceName())) {
                     List<Metrics.MetricFamily> list = message.getEnvoyMetricsList();
-
+                    Map<String, List<Metric>> groupingMetrics = new HashMap<>();
                     for (final Metrics.MetricFamily metricFamily : list) {
                         counter.inc();
-
                         try (final HistogramMetrics.Timer ignored = histogram.createTimer()) {
-                            final ProtoMetricFamily2MetricsAdapter adapter = new ProtoMetricFamily2MetricsAdapter(metricFamily);
-                            final Stream<Metric> metrics = adapter.adapt().peek(it -> {
-                                it.getLabels().putIfAbsent("cluster", service.getServiceName());
+                            final ProtoMetricFamily2MetricsAdapter adapter = new ProtoMetricFamily2MetricsAdapter(
+                                metricFamily, config.getClusterManagerMetricsAdapter());
+                            adapter.adapt().forEach(it -> {
+                                it.getLabels().putIfAbsent("app", service.getServiceName());
                                 it.getLabels().putIfAbsent("instance", service.getServiceInstanceName());
+
+                                List<Metric> metricList = groupingMetrics.computeIfAbsent(
+                                    it.getName(),
+                                    name -> new ArrayList<>()
+                                );
+                                metricList.add(it);
                             });
-                            converters.forEach(converter -> converter.toMeter(metrics));
                         }
                     }
+                    groupingMetrics.forEach(
+                        (name, metrics) ->
+                            converters.forEach(converter -> converter.toMeter(metrics.stream())));
                 }
             }
 

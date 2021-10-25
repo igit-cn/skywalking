@@ -19,32 +19,33 @@
 package org.apache.skywalking.oap.server.storage.plugin.elasticsearch.base;
 
 import java.io.IOException;
+import java.util.Map;
 import org.apache.skywalking.oap.server.core.analysis.management.ManagementData;
 import org.apache.skywalking.oap.server.core.storage.IManagementDAO;
-import org.apache.skywalking.oap.server.core.storage.StorageBuilder;
+import org.apache.skywalking.oap.server.core.storage.StorageHashMapBuilder;
 import org.apache.skywalking.oap.server.core.storage.model.Model;
 import org.apache.skywalking.oap.server.library.client.elasticsearch.ElasticSearchClient;
-import org.elasticsearch.action.get.GetResponse;
-import org.elasticsearch.common.xcontent.XContentBuilder;
 
 public class ManagementEsDAO extends EsDAO implements IManagementDAO {
-    private final StorageBuilder<ManagementData> storageBuilder;
+    private final StorageHashMapBuilder<ManagementData> storageBuilder;
 
-    public ManagementEsDAO(ElasticSearchClient client, StorageBuilder<ManagementData> storageBuilder) {
+    public ManagementEsDAO(ElasticSearchClient client,
+                           StorageHashMapBuilder<ManagementData> storageBuilder) {
         super(client);
         this.storageBuilder = storageBuilder;
     }
 
     @Override
     public void insert(Model model, ManagementData managementData) throws IOException {
-        String modelName = model.getName();
-        final String id = managementData.id();
-        final GetResponse response = getClient().get(modelName, id);
-        if (response.isExists()) {
+        String tableName = IndexController.INSTANCE.getTableName(model);
+        String docId = IndexController.INSTANCE.generateDocId(model, managementData.id());
+        final boolean exist = getClient().existDoc(tableName, docId);
+        if (exist) {
             return;
         }
-
-        XContentBuilder builder = map2builder(storageBuilder.data2Map(managementData));
-        getClient().forceInsert(modelName, id, builder);
+        Map<String, Object> source =
+            IndexController.INSTANCE.appendMetricTableColumn(model, storageBuilder.entity2Storage(
+                managementData));
+        getClient().forceInsert(tableName, docId, source);
     }
 }

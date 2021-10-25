@@ -18,12 +18,12 @@
 
 package org.apache.skywalking.oap.server.core.source;
 
+import java.util.List;
+import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.skywalking.oap.server.core.analysis.IDManager;
 import org.apache.skywalking.oap.server.core.analysis.NodeType;
-
-import java.util.List;
 
 import static org.apache.skywalking.oap.server.core.source.DefaultScopeDefine.SERVICE;
 import static org.apache.skywalking.oap.server.core.source.DefaultScopeDefine.SERVICE_CATALOG_NAME;
@@ -31,6 +31,8 @@ import static org.apache.skywalking.oap.server.core.source.DefaultScopeDefine.SE
 @ScopeDeclaration(id = SERVICE, name = "Service", catalog = SERVICE_CATALOG_NAME)
 @ScopeDefaultColumn.VirtualColumnDefinition(fieldName = "entityId", columnName = "entity_id", isID = true, type = String.class)
 public class Service extends Source {
+    private volatile String entityId;
+
     @Override
     public int scope() {
         return DefaultScopeDefine.SERVICE;
@@ -38,7 +40,10 @@ public class Service extends Source {
 
     @Override
     public String getEntityId() {
-        return IDManager.ServiceID.buildId(name, nodeType);
+        if (entityId == null) {
+            entityId = IDManager.ServiceID.buildId(name, nodeType);
+        }
+        return entityId;
     }
 
     @Getter
@@ -62,14 +67,30 @@ public class Service extends Source {
     private boolean status;
     @Getter
     @Setter
+    @Deprecated
     private int responseCode;
+    @Getter
+    @Setter
+    private int httpResponseStatusCode;
+    @Getter
+    @Setter
+    private String rpcStatusCode;
     @Getter
     @Setter
     private RequestType type;
     @Getter
     @Setter
     private List<String> tags;
+    @Setter
+    private Map<String, String> originalTags;
     @Getter
     @Setter
     private SideCar sideCar = new SideCar();
+    @Getter
+    @Setter
+    private TCPInfo tcpInfo = new TCPInfo();
+
+    public String getTag(String key) {
+        return originalTags.get(key);
+    }
 }

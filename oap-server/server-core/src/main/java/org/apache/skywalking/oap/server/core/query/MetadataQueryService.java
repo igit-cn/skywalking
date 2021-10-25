@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.skywalking.oap.server.core.Const;
 import org.apache.skywalking.oap.server.core.analysis.IDManager;
+import org.apache.skywalking.oap.server.core.analysis.NodeType;
 import org.apache.skywalking.oap.server.core.query.type.Database;
 import org.apache.skywalking.oap.server.core.query.type.Endpoint;
 import org.apache.skywalking.oap.server.core.query.type.EndpointInfo;
@@ -50,39 +51,57 @@ public class MetadataQueryService implements org.apache.skywalking.oap.server.li
 
     public List<Service> getAllServices(final String group) throws IOException {
         return getMetadataQueryDAO().getAllServices(group).stream()
-                                    .map(service -> {
+                                    .peek(service -> {
                                         if (service.getGroup() == null) {
                                             service.setGroup(Const.EMPTY_STRING);
                                         }
-                                        return service;
-                                    }).collect(Collectors.toList());
+                                    })
+                                    .distinct()
+                                    .collect(Collectors.toList());
     }
 
     public List<Service> getAllBrowserServices() throws IOException {
-        return getMetadataQueryDAO().getAllBrowserServices();
+        return getMetadataQueryDAO().getAllBrowserServices().stream().distinct().collect(Collectors.toList());
     }
 
     public List<Database> getAllDatabases() throws IOException {
-        return getMetadataQueryDAO().getAllDatabases();
+        return getMetadataQueryDAO().getAllDatabases().stream().distinct().collect(Collectors.toList());
     }
 
     public List<Service> searchServices(final long startTimestamp, final long endTimestamp,
                                         final String keyword) throws IOException {
-        return getMetadataQueryDAO().searchServices(keyword);
+        return getMetadataQueryDAO().searchServices(NodeType.Normal, keyword)
+                                    .stream()
+                                    .distinct()
+                                    .collect(Collectors.toList());
+    }
+
+    public List<Service> searchBrowserServices(final long startTimestamp, final long endTimestamp,
+                                               final String keyword) throws IOException {
+        return getMetadataQueryDAO().searchServices(NodeType.Browser, keyword)
+                                    .stream()
+                                    .distinct()
+                                    .collect(Collectors.toList());
     }
 
     public List<ServiceInstance> getServiceInstances(final long startTimestamp, final long endTimestamp,
                                                      final String serviceId) throws IOException {
-        return getMetadataQueryDAO().getServiceInstances(startTimestamp, endTimestamp, serviceId);
+        return getMetadataQueryDAO().getServiceInstances(startTimestamp, endTimestamp, serviceId)
+                                    .stream().distinct().collect(Collectors.toList());
     }
 
     public List<Endpoint> searchEndpoint(final String keyword, final String serviceId,
                                          final int limit) throws IOException {
-        return getMetadataQueryDAO().searchEndpoint(keyword, serviceId, limit);
+        return getMetadataQueryDAO().searchEndpoint(keyword, serviceId, limit)
+                                    .stream().distinct().collect(Collectors.toList());
     }
 
     public Service searchService(final String serviceCode) throws IOException {
-        return getMetadataQueryDAO().searchService(serviceCode);
+        return getMetadataQueryDAO().searchService(NodeType.Normal, serviceCode);
+    }
+
+    public Service searchBrowserService(final String serviceCode) throws IOException {
+        return getMetadataQueryDAO().searchService(NodeType.Browser, serviceCode);
     }
 
     public EndpointInfo getEndpointInfo(final String endpointId) throws IOException {

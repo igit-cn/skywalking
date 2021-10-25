@@ -27,6 +27,7 @@ import org.apache.skywalking.oap.server.configuration.api.DynamicConfigurationSe
 import org.apache.skywalking.oap.server.core.analysis.ApdexThresholdConfig;
 import org.apache.skywalking.oap.server.core.analysis.DisableRegister;
 import org.apache.skywalking.oap.server.core.analysis.StreamAnnotationListener;
+import org.apache.skywalking.oap.server.core.analysis.meter.MeterEntity;
 import org.apache.skywalking.oap.server.core.analysis.meter.MeterSystem;
 import org.apache.skywalking.oap.server.core.analysis.metrics.ApdexMetrics;
 import org.apache.skywalking.oap.server.core.analysis.worker.ManagementStreamProcessor;
@@ -38,6 +39,7 @@ import org.apache.skywalking.oap.server.core.cache.NetworkAddressAliasCache;
 import org.apache.skywalking.oap.server.core.cache.ProfileTaskCache;
 import org.apache.skywalking.oap.server.core.cluster.ClusterModule;
 import org.apache.skywalking.oap.server.core.cluster.ClusterRegister;
+import org.apache.skywalking.oap.server.core.cluster.OAPNodeChecker;
 import org.apache.skywalking.oap.server.core.cluster.RemoteInstance;
 import org.apache.skywalking.oap.server.core.command.CommandService;
 import org.apache.skywalking.oap.server.core.config.ComponentLibraryCatalogService;
@@ -47,13 +49,17 @@ import org.apache.skywalking.oap.server.core.config.IComponentLibraryCatalogServ
 import org.apache.skywalking.oap.server.core.config.NamingControl;
 import org.apache.skywalking.oap.server.core.config.group.EndpointNameGrouping;
 import org.apache.skywalking.oap.server.core.config.group.EndpointNameGroupingRuleWatcher;
+import org.apache.skywalking.oap.server.core.config.group.openapi.EndpointNameGroupingRule4OpenapiWatcher;
+import org.apache.skywalking.oap.server.core.logging.LoggingConfigWatcher;
 import org.apache.skywalking.oap.server.core.management.ui.template.UITemplateInitializer;
 import org.apache.skywalking.oap.server.core.management.ui.template.UITemplateManagementService;
+import org.apache.skywalking.oap.server.core.oal.rt.DisableOALDefine;
 import org.apache.skywalking.oap.server.core.oal.rt.OALEngineLoaderService;
 import org.apache.skywalking.oap.server.core.profile.ProfileTaskMutationService;
 import org.apache.skywalking.oap.server.core.query.AggregationQueryService;
 import org.apache.skywalking.oap.server.core.query.AlarmQueryService;
 import org.apache.skywalking.oap.server.core.query.BrowserLogQueryService;
+import org.apache.skywalking.oap.server.core.query.EventQueryService;
 import org.apache.skywalking.oap.server.core.query.LogQueryService;
 import org.apache.skywalking.oap.server.core.query.MetadataQueryService;
 import org.apache.skywalking.oap.server.core.query.MetricsMetadataQueryService;
@@ -116,6 +122,9 @@ public class CoreModuleProvider extends ModuleProvider {
     private final SourceReceiverImpl receiver;
     private ApdexThresholdConfig apdexThresholdConfig;
     private EndpointNameGroupingRuleWatcher endpointNameGroupingRuleWatcher;
+    private OALEngineLoaderService oalEngineLoaderService;
+    private LoggingConfigWatcher loggingConfigWatcher;
+    private EndpointNameGroupingRule4OpenapiWatcher endpointNameGroupingRule4OpenapiWatcher;
 
     public CoreModuleProvider() {
         super();
@@ -146,20 +155,25 @@ public class CoreModuleProvider extends ModuleProvider {
             DefaultScopeDefine.activeExtraModelColumns();
         }
         EndpointNameGrouping endpointNameGrouping = new EndpointNameGrouping();
-        this.registerServiceImplementation(NamingControl.class, new NamingControl(
+        final NamingControl namingControl = new NamingControl(
             moduleConfig.getServiceNameMaxLength(),
             moduleConfig.getInstanceNameMaxLength(),
             moduleConfig.getEndpointNameMaxLength(),
             endpointNameGrouping
-        ));
+        );
+        this.registerServiceImplementation(NamingControl.class, namingControl);
+        MeterEntity.setNamingControl(namingControl);
         try {
             endpointNameGroupingRuleWatcher = new EndpointNameGroupingRuleWatcher(
                 this, endpointNameGrouping);
+
+            if (moduleConfig.isEnableEndpointNameGroupingByOpenapi()) {
+                endpointNameGroupingRule4OpenapiWatcher = new EndpointNameGroupingRule4OpenapiWatcher(
+                    this, endpointNameGrouping);
+            }
         } catch (FileNotFoundException e) {
             throw new ModuleStartException(e.getMessage(), e);
         }
-
-        StreamAnnotationListener streamAnnotationListener = new StreamAnnotationListener(getManager());
 
         AnnotationScan scopeScan = new AnnotationScan();
         scopeScan.registerListener(new DefaultScopeDefine.Listener());
@@ -183,7 +197,8 @@ public class CoreModuleProvider extends ModuleProvider {
         if (moduleConfig.isGRPCSslEnabled()) {
             grpcServer = new GRPCServer(moduleConfig.getGRPCHost(), moduleConfig.getGRPCPort(),
                                         moduleConfig.getGRPCSslCertChainPath(),
-                                        moduleConfig.getGRPCSslKeyPath()
+                                        moduleConfig.getGRPCSslKeyPath(),
+                                        null
             );
         } else {
             grpcServer = new GRPCServer(moduleConfig.getGRPCHost(), moduleConfig.getGRPCPort());
@@ -213,6 +228,8 @@ public class CoreModuleProvider extends ModuleProvider {
                                                                .jettyMaxThreads(moduleConfig.getRestMaxThreads())
                                                                .jettyAcceptQueueSize(
                                                                    moduleConfig.getRestAcceptQueueSize())
+                                                               .jettyHttpMaxRequestHeaderSize(
+                                                                   moduleConfig.getHttpMaxRequestHeaderSize())
                                                                .build();
         jettyServer = new JettyServer(jettyServerConfig);
         jettyServer.initialize();
@@ -250,6 +267,7 @@ public class CoreModuleProvider extends ModuleProvider {
         this.registerServiceImplementation(AggregationQueryService.class, new AggregationQueryService(getManager()));
         this.registerServiceImplementation(AlarmQueryService.class, new AlarmQueryService(getManager()));
         this.registerServiceImplementation(TopNRecordsQueryService.class, new TopNRecordsQueryService(getManager()));
+        this.registerServiceImplementation(EventQueryService.class, new EventQueryService(getManager()));
 
         // add profile service implementations
         this.registerServiceImplementation(
@@ -261,9 +279,10 @@ public class CoreModuleProvider extends ModuleProvider {
         this.registerServiceImplementation(CommandService.class, new CommandService(getManager()));
 
         // add oal engine loader service implementations
-        this.registerServiceImplementation(OALEngineLoaderService.class, new OALEngineLoaderService(getManager()));
+        oalEngineLoaderService = new OALEngineLoaderService(getManager());
+        this.registerServiceImplementation(OALEngineLoaderService.class, oalEngineLoaderService);
 
-        annotationScan.registerListener(streamAnnotationListener);
+        annotationScan.registerListener(new StreamAnnotationListener(getManager()));
 
         if (moduleConfig.isGRPCSslEnabled()) {
             this.remoteClientManager = new RemoteClientManager(getManager(), moduleConfig.getRemoteTimeout(),
@@ -278,10 +297,24 @@ public class CoreModuleProvider extends ModuleProvider {
         this.registerServiceImplementation(
             UITemplateManagementService.class, new UITemplateManagementService(getManager()));
 
-        MetricsStreamProcessor.getInstance().setEnableDatabaseSession(moduleConfig.isEnableDatabaseSession());
+        if (moduleConfig.getMetricsDataTTL() < 2) {
+            throw new ModuleStartException(
+                "Metric TTL should be at least 2 days, current value is " + moduleConfig.getMetricsDataTTL());
+        }
+        if (moduleConfig.getRecordDataTTL() < 2) {
+            throw new ModuleStartException(
+                "Record TTL should be at least 2 days, current value is " + moduleConfig.getRecordDataTTL());
+        }
+
+        final MetricsStreamProcessor metricsStreamProcessor = MetricsStreamProcessor.getInstance();
+        metricsStreamProcessor.setEnableDatabaseSession(moduleConfig.isEnableDatabaseSession());
+        metricsStreamProcessor.setL1FlushPeriod(moduleConfig.getL1FlushPeriod());
+        metricsStreamProcessor.setStorageSessionTimeout(moduleConfig.getStorageSessionTimeout());
+        metricsStreamProcessor.setMetricsDataTTL(moduleConfig.getMetricsDataTTL());
         TopNStreamProcessor.getInstance().setTopNWorkerReportCycle(moduleConfig.getTopNReportPeriod());
         apdexThresholdConfig = new ApdexThresholdConfig(this);
         ApdexMetrics.setDICT(apdexThresholdConfig);
+        loggingConfigWatcher = new LoggingConfigWatcher(this);
     }
 
     @Override
@@ -289,6 +322,9 @@ public class CoreModuleProvider extends ModuleProvider {
         grpcServer.addHandler(new RemoteServiceHandler(getManager()));
         grpcServer.addHandler(new HealthCheckServiceHandler());
         remoteClientManager.start();
+
+        // Disable OAL script has higher priority
+        oalEngineLoaderService.load(DisableOALDefine.INSTANCE);
 
         try {
             receiver.scan();
@@ -313,12 +349,18 @@ public class CoreModuleProvider extends ModuleProvider {
                 .registerRemote(gRPCServerInstance);
         }
 
+        OAPNodeChecker.setROLE(CoreModuleConfig.Role.fromName(moduleConfig.getRole()));
+
         DynamicConfigurationService dynamicConfigurationService = getManager().find(ConfigurationModule.NAME)
                                                                               .provider()
                                                                               .getService(
                                                                                   DynamicConfigurationService.class);
         dynamicConfigurationService.registerConfigChangeWatcher(apdexThresholdConfig);
         dynamicConfigurationService.registerConfigChangeWatcher(endpointNameGroupingRuleWatcher);
+        dynamicConfigurationService.registerConfigChangeWatcher(loggingConfigWatcher);
+        if (moduleConfig.isEnableEndpointNameGroupingByOpenapi()) {
+            dynamicConfigurationService.registerConfigChangeWatcher(endpointNameGroupingRule4OpenapiWatcher);
+        }
     }
 
     @Override
@@ -341,6 +383,9 @@ public class CoreModuleProvider extends ModuleProvider {
         try {
             final File[] templateFiles = ResourceUtils.getPathFiles("ui-initialized-templates");
             for (final File templateFile : templateFiles) {
+                if (!templateFile.getName().endsWith(".yml") && !templateFile.getName().endsWith(".yaml")) {
+                    continue;
+                }
                 new UITemplateInitializer(new FileInputStream(templateFile))
                     .read()
                     .forEach(uiTemplate -> {

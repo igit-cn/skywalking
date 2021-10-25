@@ -14,34 +14,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG BASE_IMAGE='adoptopenjdk/openjdk8:alpine'
+ARG BASE_IMAGE='adoptopenjdk/openjdk11:alpine'
 
-FROM apache/skywalking-base:8.1.0-es6 AS cli
+ARG SKYWALKING_CLI_VERSION
+
+FROM apache/skywalking-cli:$SKYWALKING_CLI_VERSION as cli
 
 FROM $BASE_IMAGE
 
-ENV JAVA_OPTS=" -Xms256M " \
-    SW_CLUSTER="standalone" \
-    SW_STORAGE="h2"
+RUN apk add --no-cache openssl
 
-ARG DIST_NAME
+WORKDIR /skywalking
 
-COPY "$DIST_NAME.tar.gz" /
+ENV JAVA_OPTS=" -Xms2G "
+
+ARG DIST
+
+COPY "$DIST" .
 
 RUN set -ex; \
-    tar -xzf "$DIST_NAME.tar.gz"; \
-    rm -rf "$DIST_NAME.tar.gz"; \
-    rm -rf "$DIST_NAME/config/log4j2.xml"; \
-    rm -rf "$DIST_NAME/bin"; rm -rf "$DIST_NAME/webapp"; rm -rf "$DIST_NAME/agent"; \
-    mkdir "$DIST_NAME/bin"; \
-    mv "$DIST_NAME" skywalking;
+    tar -xzf "$DIST" --strip 1; \
+    rm -rf "$DIST"; \
+    rm -rf "config/log4j2.xml"; \
+    rm -rf "bin"; \
+    rm -rf "webapp"; \
+    rm -rf "agent"; \
+    mkdir "bin";
 
-WORKDIR skywalking
-
-COPY --from=cli /skywalking/bin/swctl ./bin
+COPY --from=cli /swctl ./bin
 
 COPY log4j2.xml config/
 COPY docker-entrypoint.sh .
+
 RUN mkdir ext-config; \
     mkdir ext-libs;
 

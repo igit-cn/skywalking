@@ -51,10 +51,8 @@ public class ServiceInstanceRelation extends Source {
     }
 
     @Getter
-    @ScopeDefaultColumn.DefinedByField(columnName = "source_service_instance_id")
     private String sourceServiceInstanceId;
     @Getter
-    @ScopeDefaultColumn.DefinedByField(columnName = "source_service_id")
     private String sourceServiceId;
     @Getter
     @Setter
@@ -67,10 +65,8 @@ public class ServiceInstanceRelation extends Source {
     @ScopeDefaultColumn.DefinedByField(columnName = "source_service_instance_name", requireDynamicActive = true)
     private String sourceServiceInstanceName;
     @Getter
-    @ScopeDefaultColumn.DefinedByField(columnName = "dest_service_instance_id")
     private String destServiceInstanceId;
     @Getter
-    @ScopeDefaultColumn.DefinedByField(columnName = "dest_service_id")
     private String destServiceId;
     @Setter
     private NodeType destServiceNodeType;
@@ -96,7 +92,14 @@ public class ServiceInstanceRelation extends Source {
     private boolean status;
     @Getter
     @Setter
+    @Deprecated
     private int responseCode;
+    @Getter
+    @Setter
+    private int httpResponseStatusCode;
+    @Getter
+    @Setter
+    private String rpcStatusCode;
     @Getter
     @Setter
     private RequestType type;
@@ -109,6 +112,9 @@ public class ServiceInstanceRelation extends Source {
     @Getter
     @Setter
     private SideCar sideCar = new SideCar();
+    @Getter
+    @Setter
+    private TCPInfo tcpInfo = new TCPInfo();
 
     @Override
     public void prepare() {

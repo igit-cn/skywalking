@@ -29,7 +29,7 @@ import org.apache.skywalking.oap.server.core.UnexpectedException;
 import org.apache.skywalking.oap.server.core.analysis.manual.searchtag.Tag;
 import org.apache.skywalking.oap.server.core.analysis.record.Record;
 import org.apache.skywalking.oap.server.core.query.type.ContentType;
-import org.apache.skywalking.oap.server.core.storage.StorageBuilder;
+import org.apache.skywalking.oap.server.core.storage.StorageHashMapBuilder;
 import org.apache.skywalking.oap.server.core.storage.annotation.Column;
 import org.apache.skywalking.oap.server.library.util.CollectionUtils;
 
@@ -37,7 +37,6 @@ public abstract class AbstractLogRecord extends Record {
 
     public static final String SERVICE_ID = "service_id";
     public static final String SERVICE_INSTANCE_ID = "service_instance_id";
-    public static final String ENDPOINT_NAME = "endpoint_name";
     public static final String ENDPOINT_ID = "endpoint_id";
     public static final String TRACE_ID = "trace_id";
     public static final String TRACE_SEGMENT_ID = "trace_segment_id";
@@ -60,10 +59,6 @@ public abstract class AbstractLogRecord extends Record {
     @Getter
     @Column(columnName = ENDPOINT_ID)
     private String endpointId;
-    @Setter
-    @Getter
-    @Column(columnName = ENDPOINT_NAME, matchQuery = true)
-    private String endpointName;
     @Setter
     @Getter
     @Column(columnName = TRACE_ID, length = 150)
@@ -114,13 +109,12 @@ public abstract class AbstractLogRecord extends Record {
         throw new UnexpectedException("AbstractLogRecord doesn't provide id()");
     }
 
-    public static abstract class Builder<T extends AbstractLogRecord> implements StorageBuilder<T> {
+    public static abstract class Builder<T extends AbstractLogRecord> implements StorageHashMapBuilder<T> {
 
         protected void data2Map(Map<String, Object> map, AbstractLogRecord record) {
             map.put(SERVICE_ID, record.getServiceId());
             map.put(SERVICE_INSTANCE_ID, record.getServiceInstanceId());
             map.put(ENDPOINT_ID, record.getEndpointId());
-            map.put(ENDPOINT_NAME, record.getEndpointName());
             map.put(TRACE_ID, record.getTraceId());
             map.put(TRACE_SEGMENT_ID, record.getTraceSegmentId());
             map.put(SPAN_ID, record.getSpanId());
@@ -140,7 +134,6 @@ public abstract class AbstractLogRecord extends Record {
             record.setServiceId((String) dbMap.get(SERVICE_ID));
             record.setServiceInstanceId((String) dbMap.get(SERVICE_INSTANCE_ID));
             record.setEndpointId((String) dbMap.get(ENDPOINT_ID));
-            record.setEndpointName((String) dbMap.get(ENDPOINT_NAME));
             record.setTraceId((String) dbMap.get(TRACE_ID));
             record.setTraceSegmentId((String) dbMap.get(TRACE_SEGMENT_ID));
             record.setSpanId(((Number) dbMap.get(SPAN_ID)).intValue());

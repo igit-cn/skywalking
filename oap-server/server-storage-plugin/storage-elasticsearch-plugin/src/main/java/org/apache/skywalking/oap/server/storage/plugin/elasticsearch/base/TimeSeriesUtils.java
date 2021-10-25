@@ -50,15 +50,16 @@ public class TimeSeriesUtils {
      */
     public static String latestWriteIndexName(Model model) {
         long timeBucket;
+        String tableName = IndexController.INSTANCE.getTableName(model);
         if (model.isRecord() && model.isSuperDataset()) {
             timeBucket = TimeBucket.getTimeBucket(System.currentTimeMillis(), model.getDownsampling());
-            return model.getName() + Const.LINE + compressTimeBucket(timeBucket / 1000000, SUPER_DATASET_DAY_STEP);
+            return tableName + Const.LINE + compressTimeBucket(timeBucket / 1000000, SUPER_DATASET_DAY_STEP);
         } else if (model.isRecord()) {
             timeBucket = TimeBucket.getTimeBucket(System.currentTimeMillis(), model.getDownsampling());
-            return model.getName() + Const.LINE + compressTimeBucket(timeBucket / 1000000, DAY_STEP);
+            return tableName + Const.LINE + compressTimeBucket(timeBucket / 1000000, DAY_STEP);
         } else {
             timeBucket = TimeBucket.getTimeBucket(System.currentTimeMillis(), DownSampling.Minute);
-            return model.getName() + Const.LINE + compressTimeBucket(timeBucket / 10000, DAY_STEP);
+            return tableName + Const.LINE + compressTimeBucket(timeBucket / 10000, DAY_STEP);
         }
     }
 
@@ -89,24 +90,23 @@ public class TimeSeriesUtils {
      * @return index name based on model definition and given time bucket.
      */
     static String writeIndexName(Model model, long timeBucket) {
-        final String modelName = model.getName();
-
+        String tableName = IndexController.INSTANCE.getTableName(model);
         if (model.isRecord() && model.isSuperDataset()) {
-            return modelName + Const.LINE + compressTimeBucket(timeBucket / 1000000, SUPER_DATASET_DAY_STEP);
+            return tableName + Const.LINE + compressTimeBucket(timeBucket / 1000000, SUPER_DATASET_DAY_STEP);
         } else if (model.isRecord()) {
-            return modelName + Const.LINE + compressTimeBucket(timeBucket / 1000000, DAY_STEP);
+            return tableName + Const.LINE + compressTimeBucket(timeBucket / 1000000, DAY_STEP);
         } else {
             switch (model.getDownsampling()) {
                 case None:
-                    return modelName;
+                    return tableName;
                 case Hour:
-                    return modelName + Const.LINE + compressTimeBucket(timeBucket / 100, DAY_STEP);
+                    return tableName + Const.LINE + compressTimeBucket(timeBucket / 100, DAY_STEP);
                 case Minute:
-                    return modelName + Const.LINE + compressTimeBucket(timeBucket / 10000, DAY_STEP);
+                    return tableName + Const.LINE + compressTimeBucket(timeBucket / 10000, DAY_STEP);
                 case Day:
-                    return modelName + Const.LINE + compressTimeBucket(timeBucket, DAY_STEP);
+                    return tableName + Const.LINE + compressTimeBucket(timeBucket, DAY_STEP);
                 case Second:
-                    return modelName + Const.LINE + compressTimeBucket(timeBucket / 1000000, DAY_STEP);
+                    return tableName + Const.LINE + compressTimeBucket(timeBucket / 1000000, DAY_STEP);
                 default:
                     throw new UnexpectedException("Unexpected down sampling value, " + model.getDownsampling());
             }
@@ -117,7 +117,7 @@ public class TimeSeriesUtils {
      * @return the index represented time, which is included in the index name.
      */
     static long isolateTimeFromIndexName(String indexName) {
-        return Long.valueOf(indexName.substring(indexName.lastIndexOf(Const.LINE) + 1));
+        return Long.parseLong(indexName.substring(indexName.lastIndexOf(Const.LINE) + 1));
     }
 
     /**
@@ -135,7 +135,7 @@ public class TimeSeriesUtils {
             int groupBucketOffset = days % dayStep;
             return Long.parseLong(time.minusDays(groupBucketOffset).toString(TIME_BUCKET_FORMATTER));
         } else {
-            /**
+            /*
              * No calculation required. dayStep is for lower traffic. For normally configuration, there is pointless to calculate.
              */
             return timeBucket;

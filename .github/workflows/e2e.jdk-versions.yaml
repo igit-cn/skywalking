@@ -21,47 +21,45 @@ on:
   schedule:
     - cron: '0 18 * * *'
 
+concurrency:
+  group: e2e-jdk-versions-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   JavaVersions:
+    if: (github.event_name == 'schedule' && github.repository == 'apache/skywalking') || (github.event_name != 'schedule')
     name: Agent Java Versions
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       matrix:
-        jdk: [8, 9, 10, 11, 12, 13, 14]
+        jdk: [ 8, 11, 12, 13, 14, 15 ]
     env:
-      SW_SIMPLE_CASE: jdk
       SW_AGENT_JDK_VERSION: ${{ matrix.jdk }}
-      SW_OAP_BASE_IMAGE: adoptopenjdk/openjdk${{ matrix.jdk }}:alpine
+      SW_OAP_BASE_IMAGE: adoptopenjdk/openjdk${{ matrix.jdk }}:alpine-jre
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: true
-      - name: Cache local Maven repository
-        uses: actions/cache@v2
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
+      - name: Set Skip Env Var
+        uses: ./.github/actions/skip
       - name: Set Up Java
-        uses: actions/setup-java@v1
+        if: env.SKIP_CI != 'true'
+        uses: actions/setup-java@v2
         with:
+          distribution: adopt
           java-version: ${{ matrix.jdk }}
       - name: Run E2E Test
-        uses: ./.github/actions/e2e-test
+        if: env.SKIP_CI != 'true'
+        uses: ./.github/actions/infra-e2e-test
         with:
-          test_class: org.apache.skywalking.e2e.simple.SimpleE2E
-      - uses: actions/upload-artifact@v1
-        if: failure()
-        with:
-          name: logs
-          path: logs
+          config-file: simple/jdk/e2e.yaml
 
   Single:
+    if: (github.event_name == 'schedule' && github.repository == 'apache/skywalking') || (github.event_name != 'schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs: [JavaVersions]
+    needs: [ JavaVersions ]
     steps:
       - name: Singles Bar
         run: echo "Singles Bar - Miyuki Nakajima"

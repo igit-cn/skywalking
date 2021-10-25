@@ -22,8 +22,12 @@ import java.util.Map;
 import org.apache.skywalking.oap.server.core.analysis.meter.MeterEntity;
 import org.apache.skywalking.oap.server.core.analysis.metrics.DataTable;
 import org.apache.skywalking.oap.server.core.analysis.metrics.IntList;
-import org.apache.skywalking.oap.server.core.storage.StorageBuilder;
+import org.apache.skywalking.oap.server.core.config.NamingControl;
+import org.apache.skywalking.oap.server.core.config.group.EndpointNameGrouping;
+import org.apache.skywalking.oap.server.core.storage.StorageHashMapBuilder;
+import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class PercentileFunctionTest {
@@ -45,6 +49,17 @@ public class PercentileFunctionTest {
         50,
         90
     };
+
+    @BeforeClass
+    public static void setup() {
+        MeterEntity.setNamingControl(
+            new NamingControl(512, 512, 512, new EndpointNameGrouping()));
+    }
+
+    @AfterClass
+    public static void tearDown() {
+        MeterEntity.setNamingControl(null);
+    }
 
     @Test
     public void testFunction() {
@@ -183,15 +198,15 @@ public class PercentileFunctionTest {
         );
         inst.calculate();
 
-        final StorageBuilder storageBuilder = inst.builder().newInstance();
+        final StorageHashMapBuilder storageBuilder = inst.builder().newInstance();
 
         // Simulate the storage layer do, convert the datatable to string.
-        final Map map = storageBuilder.data2Map(inst);
+        final Map map = storageBuilder.entity2Storage(inst);
         map.put(PercentileFunction.DATASET, ((DataTable) map.get(PercentileFunction.DATASET)).toStorageData());
         map.put(PercentileFunction.VALUE, ((DataTable) map.get(PercentileFunction.VALUE)).toStorageData());
         map.put(PercentileFunction.RANKS, ((IntList) map.get(PercentileFunction.RANKS)).toStorageData());
 
-        final PercentileFunction inst2 = (PercentileFunction) storageBuilder.map2Data(map);
+        final PercentileFunction inst2 = (PercentileFunction) storageBuilder.storage2Entity(map);
         Assert.assertEquals(inst, inst2);
         // HistogramFunction equal doesn't include dataset.
         Assert.assertEquals(inst.getDataset(), inst2.getDataset());

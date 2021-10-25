@@ -23,8 +23,12 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.skywalking.apm.util.StringUtil;
+import org.apache.skywalking.library.elasticsearch.response.Index;
+import org.apache.skywalking.library.elasticsearch.response.IndexTemplate;
+import org.apache.skywalking.library.elasticsearch.response.Mappings;
 import org.apache.skywalking.oap.server.core.storage.StorageException;
 import org.apache.skywalking.oap.server.core.storage.model.Model;
 import org.apache.skywalking.oap.server.core.storage.model.ModelColumn;
@@ -33,72 +37,124 @@ import org.apache.skywalking.oap.server.library.client.Client;
 import org.apache.skywalking.oap.server.library.client.elasticsearch.ElasticSearchClient;
 import org.apache.skywalking.oap.server.library.module.ModuleManager;
 import org.apache.skywalking.oap.server.storage.plugin.elasticsearch.StorageModuleElasticsearchConfig;
-import org.elasticsearch.common.unit.TimeValue;
 
 @Slf4j
 public class StorageEsInstaller extends ModelInstaller {
     private final Gson gson = new Gson();
-
     private final StorageModuleElasticsearchConfig config;
     protected final ColumnTypeEsMapping columnTypeEsMapping;
 
+    /**
+     * The mappings of the template .
+     */
+    private final IndexStructures structures;
+
     public StorageEsInstaller(Client client,
                               ModuleManager moduleManager,
-                              final StorageModuleElasticsearchConfig config) {
+                              StorageModuleElasticsearchConfig config) {
         super(client, moduleManager);
         this.columnTypeEsMapping = new ColumnTypeEsMapping();
         this.config = config;
+        this.structures = getStructures();
+    }
+
+    protected IndexStructures getStructures() {
+        return new IndexStructures();
     }
 
     @Override
-    protected boolean isExists(Model model) throws StorageException {
+    protected boolean isExists(Model model) {
         ElasticSearchClient esClient = (ElasticSearchClient) client;
-        try {
-            if (model.isTimeSeries()) {
-                return esClient.isExistsTemplate(model.getName()) && esClient.isExistsIndex(
-                    TimeSeriesUtils.latestWriteIndexName(model));
-            } else {
-                return esClient.isExistsIndex(model.getName());
-            }
-        } catch (IOException e) {
-            throw new StorageException(e.getMessage());
+        String tableName = IndexController.INSTANCE.getTableName(model);
+        IndexController.LogicIndicesRegister.registerRelation(model.getName(), tableName);
+        if (!model.isTimeSeries()) {
+            return esClient.isExistsIndex(tableName);
         }
+        boolean templateExists = esClient.isExistsTemplate(tableName);
+        final Optional<IndexTemplate> template = esClient.getTemplate(tableName);
+        boolean lastIndexExists = esClient.isExistsIndex(TimeSeriesUtils.latestWriteIndexName(model));
+
+        if ((templateExists && !template.isPresent()) || (!templateExists && template.isPresent())) {
+            throw new Error("[Bug warning] ElasticSearch client query template result is not consistent. " +
+                                "Please file an issue to Apache SkyWalking.(https://github.com/apache/skywalking/issues)");
+        }
+
+        boolean exist = templateExists && lastIndexExists;
+
+        if (exist && IndexController.INSTANCE.isMetricModel(model)) {
+            structures.putStructure(
+                tableName, template.get().getMappings()
+            );
+            exist = structures.containsStructure(tableName, createMapping(model));
+        }
+        return exist;
     }
 
     @Override
     protected void createTable(Model model) throws StorageException {
+        if (model.isTimeSeries()) {
+            createTimeSeriesTable(model);
+        } else {
+            createNormalTable(model);
+        }
+    }
+
+    private void createNormalTable(Model model) throws StorageException {
         ElasticSearchClient esClient = (ElasticSearchClient) client;
+        String tableName = IndexController.INSTANCE.getTableName(model);
+        if (!esClient.isExistsIndex(tableName)) {
+            boolean isAcknowledged = esClient.createIndex(tableName);
+            log.info("create {} index finished, isAcknowledged: {}", tableName, isAcknowledged);
+            if (!isAcknowledged) {
+                throw new StorageException("create " + tableName + " time series index failure, ");
+            }
+        }
+    }
 
+    private void createTimeSeriesTable(Model model) throws StorageException {
+        ElasticSearchClient esClient = (ElasticSearchClient) client;
+        String tableName = IndexController.INSTANCE.getTableName(model);
         Map<String, Object> settings = createSetting(model);
-        Map<String, Object> mapping = createMapping(model);
-        log.info("index {}'s columnTypeEsMapping builder str: {}", esClient.formatIndexName(model.getName()), mapping
-            .toString());
-
+        Mappings mapping = createMapping(model);
+        String indexName = TimeSeriesUtils.latestWriteIndexName(model);
         try {
-            String indexName;
-            if (!model.isTimeSeries()) {
-                indexName = model.getName();
-            } else {
-                if (!esClient.isExistsTemplate(model.getName())) {
-                    boolean isAcknowledged = esClient.createTemplate(model.getName(), settings, mapping);
-                    log.info(
-                        "create {} index template finished, isAcknowledged: {}", model.getName(), isAcknowledged);
+            boolean shouldUpdateTemplate = !esClient.isExistsTemplate(tableName);
+            if (IndexController.INSTANCE.isMetricModel(model)) {
+                shouldUpdateTemplate = shouldUpdateTemplate || !structures.containsStructure(tableName, mapping);
+            }
+            if (shouldUpdateTemplate) {
+                structures.putStructure(tableName, mapping);
+                boolean isAcknowledged = esClient.createOrUpdateTemplate(
+                    tableName, settings, structures.getMapping(tableName), config.getIndexTemplateOrder());
+                log.info("create {} index template finished, isAcknowledged: {}", tableName, isAcknowledged);
+                if (!isAcknowledged) {
+                    throw new IOException("create " + tableName + " index template failure, ");
+                }
+
+                if (esClient.isExistsIndex(indexName)) {
+                    Mappings historyMapping = esClient.getIndex(indexName)
+                                                      .map(Index::getMappings)
+                                                      .orElseGet(Mappings::new);
+                    Mappings appendMapping = structures.diffStructure(tableName, historyMapping);
+                    if (appendMapping.getProperties() != null && !appendMapping.getProperties().isEmpty()) {
+                        isAcknowledged = esClient.updateIndexMapping(indexName, appendMapping);
+                        log.info("update {} index finished, isAcknowledged: {}, append mappings: {}", indexName,
+                                 isAcknowledged, appendMapping
+                        );
+                        if (!isAcknowledged) {
+                            throw new StorageException("update " + indexName + " time series index failure");
+                        }
+                    }
+                } else {
+                    isAcknowledged = esClient.createIndex(indexName);
+                    log.info("create {} index finished, isAcknowledged: {}", indexName, isAcknowledged);
                     if (!isAcknowledged) {
-                        throw new StorageException("create " + model.getName() + " index template failure, ");
+                        throw new StorageException("create " + indexName + " time series index failure");
                     }
                 }
-                indexName = TimeSeriesUtils.latestWriteIndexName(model);
             }
-            if (!esClient.isExistsIndex(indexName)) {
-                boolean isAcknowledged = esClient.createIndex(indexName);
-                log.info("create {} index finished, isAcknowledged: {}", indexName, isAcknowledged);
-                if (!isAcknowledged) {
-                    throw new StorageException("create " + indexName + " time series index failure, ");
-                }
-            }
-
         } catch (IOException e) {
-            throw new StorageException(e.getMessage());
+            throw new StorageException("cannot create " + tableName + " index template", e);
         }
     }
 
@@ -111,13 +167,23 @@ public class StorageEsInstaller extends ModelInstaller {
         setting.put("index.number_of_shards", model.isSuperDataset()
             ? config.getIndexShardsNumber() * config.getSuperDatasetIndexShardsFactor()
             : config.getIndexShardsNumber());
-        setting.put("index.refresh_interval", model.isRecord()
-            ? TimeValue.timeValueSeconds(10).toString()
-            : TimeValue.timeValueSeconds(config.getFlushInterval()).toString());
+        // Set the index refresh period as INT(flushInterval * 2/3). At the edge case,
+        // in low traffic(traffic < bulkActions in the whole period), there is a possible case, 2 period bulks are included in
+        // one index refresh rebuild operation, which could cause version conflicts. And this case can't be fixed
+        // through `core/persistentPeriod` as the bulk fresh is not controlled by the persistent timer anymore.
+        int indexRefreshInterval = config.getFlushInterval() * 2 / 3;
+        if (indexRefreshInterval < 5) {
+            // The refresh interval should not be less than 5 seconds (the recommended default value = 10s),
+            // and the bulk flush interval should not be set less than 8s (the recommended default value = 15s).
+            // This is a precaution case which makes ElasticSearch server has reasonable refresh interval,
+            // even this value is set too small by end user manually.
+            indexRefreshInterval = 5;
+        }
+        setting.put("index.refresh_interval", indexRefreshInterval + "s");
         setting.put("analysis", getAnalyzerSetting(model.getColumns()));
         if (!StringUtil.isEmpty(config.getAdvanced())) {
             Map<String, Object> advancedSettings = gson.fromJson(config.getAdvanced(), Map.class);
-            advancedSettings.forEach(setting::put);
+            setting.putAll(advancedSettings);
         }
         return setting;
     }
@@ -133,15 +199,8 @@ public class StorageEsInstaller extends ModelInstaller {
         return gson.fromJson(gson.toJson(analyzerSetting), Map.class);
     }
 
-    protected Map<String, Object> createMapping(Model model) {
-        Map<String, Object> mapping = new HashMap<>();
-        Map<String, Object> type = new HashMap<>();
-
-        mapping.put(ElasticSearchClient.TYPE, type);
-
+    protected Mappings createMapping(Model model) {
         Map<String, Object> properties = new HashMap<>();
-        type.put("properties", properties);
-
         for (ModelColumn columnDefine : model.getColumns()) {
             if (columnDefine.isMatchQuery()) {
                 String matchCName = MatchCNameBuilder.INSTANCE.build(columnDefine.getColumnName().getName());
@@ -167,8 +226,17 @@ public class StorageEsInstaller extends ModelInstaller {
             }
         }
 
-        log.debug("elasticsearch index template setting: {}", mapping.toString());
+        if (IndexController.INSTANCE.isMetricModel(model)) {
+            Map<String, Object> column = new HashMap<>();
+            column.put("type", "keyword");
+            properties.put(IndexController.LogicIndicesRegister.METRIC_TABLE_NAME, column);
+        }
+        Mappings mappings = Mappings.builder()
+                                    .type("type")
+                                    .properties(properties)
+                                    .build();
+        log.debug("elasticsearch index template setting: {}", mappings.toString());
 
-        return mapping;
+        return mappings;
     }
 }

@@ -38,7 +38,7 @@ disableStatement
     ;
 
 metricStatement
-    : FROM LR_BRACKET source (sourceAttributeStmt+) RR_BRACKET (filterStatement+)? DOT aggregateFunction
+    : FROM LR_BRACKET (sourceAttrCast)? source (sourceAttributeStmt+) RR_BRACKET (filterStatement+)? DOT aggregateFunction
     ;
 
 filterStatement
@@ -52,11 +52,12 @@ filterExpression
 source
     : SRC_ALL | SRC_SERVICE | SRC_DATABASE_ACCESS | SRC_SERVICE_INSTANCE | SRC_ENDPOINT |
       SRC_SERVICE_RELATION | SRC_SERVICE_INSTANCE_RELATION | SRC_ENDPOINT_RELATION |
-      SRC_SERVICE_INSTANCE_JVM_CPU | SRC_SERVICE_INSTANCE_JVM_MEMORY | SRC_SERVICE_INSTANCE_JVM_MEMORY_POOL | SRC_SERVICE_INSTANCE_JVM_GC | SRC_SERVICE_INSTANCE_JVM_THREAD |// JVM source of service instance
       SRC_SERVICE_INSTANCE_CLR_CPU | SRC_SERVICE_INSTANCE_CLR_GC | SRC_SERVICE_INSTANCE_CLR_THREAD |
+      SRC_SERVICE_INSTANCE_JVM_CPU | SRC_SERVICE_INSTANCE_JVM_MEMORY | SRC_SERVICE_INSTANCE_JVM_MEMORY_POOL | SRC_SERVICE_INSTANCE_JVM_GC | SRC_SERVICE_INSTANCE_JVM_THREAD | SRC_SERVICE_INSTANCE_JVM_CLASS |// JVM source of service instance
       SRC_ENVOY_INSTANCE_METRIC |
       SRC_BROWSER_APP_PERF | SRC_BROWSER_APP_PAGE_PERF | SRC_BROWSER_APP_SINGLE_VERSION_PERF |
-      SRC_BROWSER_APP_TRAFFIC | SRC_BROWSER_APP_PAGE_TRAFFIC | SRC_BROWSER_APP_SINGLE_VERSION_TRAFFIC
+      SRC_BROWSER_APP_TRAFFIC | SRC_BROWSER_APP_PAGE_TRAFFIC | SRC_BROWSER_APP_SINGLE_VERSION_TRAFFIC |
+      SRC_EVENT
     ;
 
 disableSource
@@ -68,7 +69,7 @@ sourceAttributeStmt
     ;
 
 sourceAttribute
-    : IDENTIFIER | ALL
+    : IDENTIFIER | ALL | mapAttribute
     ;
 
 variable
@@ -76,7 +77,7 @@ variable
     ;
 
 aggregateFunction
-    : functionName LR_BRACKET ((funcParamExpression (COMMA funcParamExpression)?) | (literalExpression (COMMA literalExpression)?))? RR_BRACKET
+    : functionName LR_BRACKET ((funcParamExpression|literalExpression|attributeExpression) (COMMA (funcParamExpression|literalExpression|attributeExpression))?)? RR_BRACKET
     ;
 
 functionName
@@ -88,11 +89,19 @@ funcParamExpression
     ;
 
 literalExpression
-    : BOOL_LITERAL | NUMBER_LITERAL | IDENTIFIER
+    : BOOL_LITERAL | NUMBER_LITERAL | STRING_LITERAL
+    ;
+
+attributeExpression
+    : functionArgCast? attributeExpressionSegment (DOT attributeExpressionSegment)*
+    ;
+
+attributeExpressionSegment
+    : (IDENTIFIER | mapAttribute)
     ;
 
 expression
-    : booleanMatch | stringMatch | greaterMatch | lessMatch | greaterEqualMatch | lessEqualMatch | notEqualMatch | booleanNotEqualMatch | likeMatch | inMatch | containMatch | notContainMatch
+    : booleanMatch | numberMatch | stringMatch | greaterMatch | lessMatch | greaterEqualMatch | lessEqualMatch | notEqualMatch | booleanNotEqualMatch | likeMatch | inMatch | containMatch | notContainMatch
     ;
 
 containMatch
@@ -107,8 +116,12 @@ booleanMatch
     : conditionAttributeStmt DUALEQUALS booleanConditionValue
     ;
 
+numberMatch
+    : conditionAttributeStmt DUALEQUALS numberConditionValue
+    ;
+
 stringMatch
-    :  conditionAttributeStmt DUALEQUALS (stringConditionValue | enumConditionValue)
+    :  conditionAttributeStmt DUALEQUALS (stringConditionValue | enumConditionValue | nullConditionValue)
     ;
 
 greaterMatch
@@ -132,7 +145,7 @@ booleanNotEqualMatch
     ;
 
 notEqualMatch
-    :  conditionAttributeStmt NOT_EQUAL (numberConditionValue | stringConditionValue | enumConditionValue)
+    :  conditionAttributeStmt NOT_EQUAL (numberConditionValue | stringConditionValue | enumConditionValue | nullConditionValue)
     ;
 
 likeMatch
@@ -148,11 +161,15 @@ multiConditionValue
     ;
 
 conditionAttributeStmt
-    : conditionAttribute ((DOT conditionAttribute)*)
+    : (expressionAttrCast)? conditionAttribute ((DOT conditionAttribute)*)
     ;
 
 conditionAttribute
-    : IDENTIFIER
+    : (IDENTIFIER | mapAttribute)
+    ;
+
+mapAttribute
+    : IDENTIFIER LS_BRACKET STRING_LITERAL RS_BRACKET
     ;
 
 booleanConditionValue
@@ -169,4 +186,24 @@ enumConditionValue
 
 numberConditionValue
     : NUMBER_LITERAL
+    ;
+
+nullConditionValue
+    : NULL_LITERAL
+    ;
+
+sourceAttrCast
+    : castStmt
+    ;
+
+expressionAttrCast
+    : castStmt
+    ;
+
+functionArgCast
+    : castStmt
+    ;
+
+castStmt
+    : STRING_TO_LONG | STRING_TO_LONG_SHORT | STRING_TO_INT | STRING_TO_INT_SHORT
     ;

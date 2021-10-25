@@ -28,69 +28,43 @@ on:
 env:
   SW_AGENT_JDK_VERSION: 8
 
+concurrency:
+  group: e2e-features-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   FeatureGroup01:
-    name: Feature
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    strategy:
-      matrix:
-        case: [auth, ssl]
-    env:
-      SW_SIMPLE_CASE: ${{ matrix.case }}
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: true
-      - name: Cache local Maven repository
-        uses: actions/cache@v2
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-      - name: Run E2E Test
-        uses: ./.github/actions/e2e-test
-        with:
-          test_class: org.apache.skywalking.e2e.simple.SimpleE2E
-      - uses: actions/upload-artifact@v1
-        if: failure()
-        with:
-          name: logs
-          path: logs
-
-  FeatureGroup02:
+    if: (github.event_name == 'schedule' && github.repository == 'apache/skywalking') || (github.event_name != 'schedule')
     name: ${{ matrix.case.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       matrix:
         case:
+          - name: Auth
+            config-file: simple/auth/e2e.yaml
+          - name: SSL
+            config-file: simple/ssl/e2e.yaml
+          - name: mTLS
+            config-file: simple/mtls/e2e.yaml
           - name: Lua Nginx
-            class: org.apache.skywalking.e2e.LuaE2E
+            config-file: lua/e2e.yaml
           - name: Gateway
-            class: org.apache.skywalking.e2e.GatewayE2E
+            config-file: gateway/e2e.yaml
           - name: Meter
-            class: org.apache.skywalking.e2e.meter.MeterE2E
-          - name: Alarm
-            class: org.apache.skywalking.e2e.alarm.AlarmE2E
+            config-file: meter/e2e.yaml
+          - name: VM Zabbix
+            config-file: vm/zabbix/e2e.yaml
+          - name: VM Prometheus Node Exporter
+            config-file: vm/prometheus-node-exporter/e2e.yaml
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: true
-      - name: Cache local Maven repository
-        uses: actions/cache@v2
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
+      - name: Set Skip Env Var
+        uses: ./.github/actions/skip
       - name: Run E2E Test
-        uses: ./.github/actions/e2e-test
+        if: env.SKIP_CI != 'true'
+        uses: ./.github/actions/infra-e2e-test
         with:
-          test_class: ${{ matrix.case.class }}
-      - uses: actions/upload-artifact@v1
-        if: failure()
-        with:
-          name: logs
-          path: logs
+          config-file: ${{ matrix.case.config-file }}

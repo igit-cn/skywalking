@@ -1,14 +1,14 @@
-private void do${metricsName}(${sourcePackage}${sourceName} source) {
-${metricsClassPackage}${metricsName}Metrics metrics = new ${metricsClassPackage}${metricsName}Metrics();
+private void do${metricsName}(${sourcePackage}${from.sourceName} source) {
 
-<#if filterExpressions??>
-    <#list filterExpressions as filterExpression>
+<#if filters.filterExpressions??>
+    <#list filters.filterExpressions as filterExpression>
         if (!new ${filterExpression.expressionObject}().match(${filterExpression.left}, ${filterExpression.right})) {
         return;
         }
     </#list>
 </#if>
 
+${metricsClassPackage}${metricsName}Metrics metrics = new ${metricsClassPackage}${metricsName}Metrics();
 metrics.setTimeBucket(source.getTimeBucket());
 <#list fieldsFromSource as field>
     metrics.${field.fieldSetter}(source.${field.fieldGetter}());
